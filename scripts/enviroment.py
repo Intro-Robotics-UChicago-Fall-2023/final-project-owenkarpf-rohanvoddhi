@@ -8,7 +8,7 @@ from os import path
 import numpy as np
 import rospy
 from gazebo_msgs.msg import ModelState
-from geometry_msgs.msg import Twist, Point, Pose, Vector3, Quaternion
+from geometry_msgs.msg import Twist, Point, Pose, Vector3
 from gazebo_msgs.srv import SetModelState
 from sensor_msgs.msg import LaserScan, Image
 from std_srvs.srv import Empty
@@ -48,7 +48,6 @@ class Environment:
         arguments_to_run_launchfile = ["roslaunch", PROJECT_NAME, LAUNCH_FILE_NAME]
         subprocess.Popen(arguments_to_run_launchfile)
         time.sleep(10)
-        self.unpause()
 
     def store_scan_vals(self, scan_data):
         self.ranges = list(scan_data.ranges)
@@ -65,15 +64,15 @@ class Environment:
         """
         image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
         self.rgb_img = image
-        print(self.at_target())
+        print(self.is_at_target())
 
-    def wall_detected(self):
+    def is_at_wall(self):
         for range in self.ranges:
             if range == float('inf') or range == 0:
                 return True
         return False
 
-    def at_target(self):
+    def is_at_target(self):
         image_x = self.rgb_img.shape[1]
         lower_blue = np.array([80, 40, 20])
         upper_blue = np.array([100, 255, 255])
@@ -100,10 +99,10 @@ class Environment:
 
 
     def determine_reward(self, linear_speed, absolute_turn_speed):
-        if self.at_target():
+        if self.is_at_target():
             return 500
 
-        if self.wall_detected():
+        if self.is_at_wall():
             return -500
 
         # Greatly penalize small turn values (slow == bad), penalize all turns & greater reward for large linear speeds!
@@ -121,16 +120,25 @@ class Environment:
         return turn_reward + linear_reward
 
     def perform_action(self, action):
+        # perform the action, return the state after moving robot along with the world being done (robot hit wall or reached goal) and current reward
         new_linear_vel, new_angular_vel = action
         self.vel.linear.x = new_linear_vel
         self.vel.angular.z = new_angular_vel
+        self.velocity_publisher.publish(self.vel)
         rospy.wait_for_service("/gazebo/unpause_physics")
         self.unpause()
         time.sleep(.1)
         rospy.wait_for_service("/gazebo/pause_physics")
         self.pause()
+        sim_ended_status = self.is_at_target() or self.is_at_wall()
+        current_state = self.generate_state_from_scan()
+        
+        current_reward = self.determine_reward(new_linear_vel, new_angular_vel)
+
+        return current_state,  sim_ended_status, current_reward
 
     def generate_state_from_scan(self):
+        # Codense LIDAR into smaller subsample to reduce training time
         condensed_states = []
         for i in range(36):
             current_subsample = self.ranges[i * 10: i * 10 + 10]
@@ -138,7 +146,18 @@ class Environment:
         return condensed_states
 
     def reset_the_world(self):
+        # returns initial state and that its not done simming
+        self.unpause()
+        self.vel.linear.x = 0
+        self.vel.angular.z = 0
+        self.velocity_publisher.publish(self.vel)
+        time.sleep(1)
         self.reset_world()
+        time.sleep(1)
+        self.pause()
+        time.sleep(1)
+        current_state = self.generate_state_from_scan()
+        return current_state, False
         
 
 Environment()
