@@ -93,14 +93,14 @@
         <visual name='visual'>
           <geometry>
             <mesh>
-              <uri>model://particle_filter_project/gazebo_custom_meshes/turtlebot3_maze.dae</uri>
+              <uri>model://final_project/gazebo_custom_meshes/turtlebot3_maze.dae</uri>
             </mesh>
           </geometry>
         </visual>
         <collision name='collision'>
           <geometry>
             <mesh>
-              <uri>model://particle_filter_project/gazebo_custom_meshes/turtlebot3_maze.dae</uri>
+              <uri>model://final_project/gazebo_custom_meshes/turtlebot3_maze.dae</uri>
             </mesh>
           </geometry>
           <max_contacts>10</max_contacts>

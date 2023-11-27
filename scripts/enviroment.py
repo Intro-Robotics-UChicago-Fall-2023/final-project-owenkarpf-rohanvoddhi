@@ -17,7 +17,7 @@ import cv_bridge
 
 
 
-PROJECT_NAME = 'particle_filter_project'
+PROJECT_NAME = 'final_project'
 LAUNCH_FILE_NAME = 'modified_maze.launch'
 
 class Environment:
@@ -47,25 +47,14 @@ class Environment:
         rospy.init_node("environment")
         arguments_to_run_launchfile = ["roslaunch", PROJECT_NAME, LAUNCH_FILE_NAME]
         subprocess.Popen(arguments_to_run_launchfile)
-
-        # state_msg = ModelState()
-        # state_msg.model_name = 'turtlebot3'
-        # state_msg.pose.position.x = .2
-        # state_msg.pose.position.y = .2
-        # state_msg.pose.position.z = 0.3
-        # state_msg.pose.orientation.x = .4
-        # state_msg.pose.orientation.y = .3
-        # state_msg.pose.orientation.w = .2
-        # self.model_state_pub.publish(state_msg)
-        # print("State set theoretically!")
-
+        time.sleep(10)
+        self.unpause()
 
     def store_scan_vals(self, scan_data):
-        print('ranges given')
         self.ranges = list(scan_data.ranges)
         for i in range(len(self.ranges)):
-            if self.ranges[i] == 0:
-                self.ranges[i] = float('inf')
+            if self.ranges[i] == float('inf'):
+                self.ranges[i] = 0
 
     def image_callback(self, msg):
         print('image callback occurred')
@@ -76,6 +65,7 @@ class Environment:
         """
         image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
         self.rgb_img = image
+        print(self.at_target())
 
     def wall_detected(self):
         for range in self.ranges:
@@ -85,24 +75,26 @@ class Environment:
 
     def at_target(self):
         image_x = self.rgb_img.shape[1]
-        lower_blue = np.array([90, 120, 100])
-        upper_blue = np.array([95, 255, 255])
+        lower_blue = np.array([80, 40, 20])
+        upper_blue = np.array([100, 255, 255])
         hsv = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2HSV)
         blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
         M_blue = cv2.moments(blue_mask)
 
         if M_blue['m00'] == 0:
-            self.blue_x = None
-            self.blue_y = None
+            self.blue_x = 0
+            self.blue_y = 0
 
         elif M_blue['m00'] != 0:
+            print('mask detected')
             self.blue_x = int(M_blue['m10']/M_blue['m00'])
             self.blue_y = int(M_blue['m01']/M_blue['m00'])
         goal_x = image_x / 2
-        dx = np.fabs(image_x - goal_x)
+        dx = np.fabs(goal_x - self.blue_x)
+        print(dx)
 
-        if dx < 50 and self.ranges[0] < .5:
+        if dx < 50 and self.ranges[0] < .3:
             return True
         return False
 
@@ -133,17 +125,17 @@ class Environment:
         self.vel.linear.x = new_linear_vel
         self.vel.angular.z = new_angular_vel
         rospy.wait_for_service("/gazebo/unpause_physics")
-        try:
-            self.unpause()
-        except rospy.ServiceException as e:
-            print("/gazebo/unpause_physics service call failed")
+        self.unpause()
         time.sleep(.1)
         rospy.wait_for_service("/gazebo/pause_physics")
-        try:
-            pass
-            self.pause()
-        except (rospy.ServiceException) as e:
-            print("/gazebo/pause_physics service call failed")
+        self.pause()
+
+    def generate_state_from_scan(self):
+        condensed_states = []
+        for i in range(36):
+            current_subsample = self.ranges[i * 10: i * 10 + 10]
+            condensed_states.append(np.median(current_subsample))
+        return condensed_states
 
     def reset_the_world(self):
         self.reset_world()
