@@ -112,7 +112,7 @@ class Environment:
             linear_reward = linear_speed
         if absolute_turn_speed == 0:
             turn_reward = 0
-        elif absolute_turn_speed < .4:
+        elif absolute_turn_speed < .2:
             turn_reward = -1 * 1/absolute_turn_speed
         else:
             turn_reward = -absolute_turn_speed
