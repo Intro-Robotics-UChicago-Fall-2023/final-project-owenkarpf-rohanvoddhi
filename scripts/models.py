@@ -4,17 +4,20 @@ import os
 import subprocess
 import time
 from os import path
+from math import atan2
 
 import numpy as np
 import rospy
 from gazebo_msgs.msg import ModelState
-from geometry_msgs.msg import Twist, Point, Pose, Vector3
+from geometry_msgs.msg import Twist, Point, Pose, Vector3, Quaternion
 from gazebo_msgs.srv import SetModelState
 from sensor_msgs.msg import LaserScan, Image
+from nav_msgs.msg import Odometry
 from std_srvs.srv import Empty
 import cv2
 import cv_bridge
 
+from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
 
 PROJECT_NAME = 'final_project'
@@ -35,7 +38,9 @@ class Environment:
         self.scan_sub = rospy.Subscriber('/scan', LaserScan, self.store_scan_vals)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw',
                                     Image, self.image_callback)
-
+        self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odometry_callback)
+        self.odom = None
+        self.goal = np.array([-1.2,1.3])
         # Instantiate fields to pause and unpause gazebo & reset world to default values
         self.unpause = rospy.ServiceProxy("/gazebo/unpause_physics", Empty)
         self.pause = rospy.ServiceProxy("/gazebo/pause_physics", Empty)
@@ -65,6 +70,9 @@ class Environment:
         image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
         self.rgb_img = image
         
+    def odometry_callback(self, msg):
+        self.odom = msg.pose.pose
+
     def is_at_wall(self):
         for dist in self.ranges:
             if dist == float('inf') or dist < .17:
@@ -97,26 +105,42 @@ class Environment:
 
 
     def determine_reward(self, linear_speed, absolute_turn_speed):
+
+        dist_to_goal = np.linalg.norm(np.array([self.odom.position.x,self.odom.position.y])- self.goal,ord=2)
+        
+        theo_theta = atan2(self.goal[1] - self.odom.position.y, self.goal[0] - self.odom.position.x)
+
+        theta = euler_from_quaternion([
+            self.odom.orientation.x, 
+            self.odom.orientation.y, 
+            self.odom.orientation.z, 
+            self.odom.orientation.w])[2]
+
+        theta_diff = abs(theo_theta - theta)
+        print(f"THETA DIFF: {theta_diff}, THEO: {theo_theta}, ACC: {theta}")
+        
         if self.is_at_target():
             return 500000
 
         if self.is_at_wall():
-            return -200
+            return -5000
 
         # Greatly penalize small turn values (slow == bad), penalize all turns & greater reward for large linear speeds!
         # if linear_speed < .1:
         #     linear_reward = -.05
         # else:
-        linear_reward = linear_speed * 200
-        turn_reward = -abs(absolute_turn_speed) * 125
+        linear_reward = linear_speed * 20
+        turn_reward = -abs(absolute_turn_speed) * 10
+        dist_reward = 0#-dist_to_goal * 5
+        theta_reward = -20 * theta_diff
         # if absolute_turn_speed == 0:
         #     turn_reward = 0
         # elif absolute_turn_speed < .2:
         #     turn_reward = -1 * 1/absolute_turn_speed
         # else:
         #     turn_reward = -absolute_turn_speed
-        print(f"LINEAR REWARD: {linear_reward}, TURN: {turn_reward}")
-        return turn_reward + linear_reward
+        print(f"LINEAR REWARD: {linear_reward}, TURN: {turn_reward}, DIST: {dist_reward}, THETA: {theta_reward}")
+        return turn_reward + linear_reward + dist_reward + theta_reward
 
     def perform_action(self, action):
         # perform the action, return the state after moving robot along with the world being done (robot hit wall or reached goal) and current reward
@@ -126,7 +150,7 @@ class Environment:
         self.velocity_publisher.publish(self.vel)
         rospy.wait_for_service("/gazebo/unpause_physics")
         self.unpause()
-        time.sleep(.05)
+        time.sleep(.02)
         rospy.wait_for_service("/gazebo/pause_physics")
         self.pause()
         sim_ended_status = self.is_at_target() or self.is_at_wall()
@@ -144,15 +168,77 @@ class Environment:
             condensed_states.append(np.median(current_subsample))
         return condensed_states
 
+
+    def reset_model_position_randomly(self):
+        initial_state_one = ModelState()
+        initial_state_one.model_name = 'turtlebot3'
+        initial_state_one.pose.position.x = -.25
+        initial_state_one.pose.position.y = 0
+        initial_state_one.pose.position.z = 0
+        initial_state_one.pose.orientation.x = 0
+        initial_state_one.pose.orientation.y = 0
+        initial_state_one.pose.orientation.w = 0
+
+        initial_state_two = ModelState()
+        initial_state_two.model_name = 'turtlebot3'
+        initial_state_two.pose.position.x = -1.2
+        initial_state_two.pose.position.y = -1.2
+        initial_state_two.pose.position.z = 0
+        initial_state_two.pose.orientation.x = 0
+        initial_state_two.pose.orientation.y = 0
+        initial_state_two.pose.orientation.w = 0
+
+        cur_quat = quaternion_from_euler(0, 0, 0)
+        initial_state_three = ModelState()
+        initial_state_three.model_name = 'turtlebot3'
+        initial_state_three.pose.position.x = -.3
+        initial_state_three.pose.position.y = 1.3
+        initial_state_three.pose.position.z = 0
+        initial_state_three.pose.orientation.x = cur_quat[0]
+        initial_state_three.pose.orientation.y = cur_quat[1]
+        initial_state_three.pose.orientation.w = cur_quat[2]
+        initial_state_three.pose.orientation.z = cur_quat[3]
+
+        cur_quat = quaternion_from_euler(0, 0, math.pi/2)
+        initial_state_four = ModelState()
+        initial_state_four.model_name = 'turtlebot3'
+        initial_state_four.pose.position.x = -.25
+        initial_state_four.pose.position.y = -1.2
+        initial_state_four.pose.position.z = 0
+        initial_state_four.pose.orientation.x = cur_quat[0]
+        initial_state_four.pose.orientation.y = cur_quat[1]
+        initial_state_four.pose.orientation.w = cur_quat[2]
+        initial_state_four.pose.orientation.z = cur_quat[3]
+
+        cur_quat = quaternion_from_euler(0, 0, -math.pi/4)
+        initial_state_five = ModelState()
+        initial_state_five.model_name = 'turtlebot3'
+        initial_state_five.pose.position.x = .95
+        initial_state_five.pose.position.y = 1.3
+        initial_state_five.pose.position.z = 0
+        initial_state_five.pose.orientation.x = cur_quat[0]
+        initial_state_five.pose.orientation.y = cur_quat[1]
+        initial_state_five.pose.orientation.w = cur_quat[2]
+        initial_state_five.pose.orientation.z = cur_quat[3]
+        
+        
+        arr_of_states = [initial_state_one, initial_state_two, initial_state_three, initial_state_four, initial_state_five]
+        
+        self.model_state_pub.publish(np.random.choice(arr_of_states))
+
+
+
     def reset_the_world(self):
         # returns initial state and that its not done simming
         self.unpause()
         self.vel.linear.x = 0
         self.vel.angular.z = 0
         self.velocity_publisher.publish(self.vel)
-        time.sleep(1)
+        time.sleep(.1)
         self.reset_world()
-        time.sleep(1)
+        time.sleep(.5)
+        self.reset_model_position_randomly()
+        time.sleep(.5)
         self.pause()
         time.sleep(1)
         current_state = self.generate_state_from_scan()
@@ -180,22 +266,23 @@ MAX_ANGULAR_VEL = 1.86
 MIN_ANGULAR_VEL = -1.86
 ACTOR_LEARNING_RATE = .0001
 CRITIC_LEARNING_RATE =  .001
-TAU = .001
+TAU = .01
 BUFFER_SIZE = 1500
 MAX_ITERATIONS = 50000
 MAX_ITERATION_STEPS = 1000
 GAMMA = .995
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+WARMUP_ITERATIONS = 150
 
 class ActorNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(ActorNetwork, self).__init__()
         self.actor_network = nn.Sequential(
-            nn.Linear(state_shape, 2048),
+            nn.Linear(state_shape, 32),
             nn.ReLU(),
-            nn.Linear(2048, 512),
+            nn.Linear(32, 64),
             nn.ReLU(),
-            nn.Linear(512, action_shape),
+            nn.Linear(64, action_shape),
             nn.Tanh()
         )
 
@@ -208,11 +295,11 @@ class CriticNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(CriticNetwork, self).__init__()
         self.critic_network = nn.Sequential(
-            nn.Linear(state_shape + action_shape, 2048),
+            nn.Linear(state_shape + action_shape, 32),
             nn.ReLU(),
-            nn.Linear(2048, 1024),
+            nn.Linear(32, 64),
             nn.ReLU(),
-            nn.Linear(1024, 1)
+            nn.Linear(64, 1)
         )
 
     def forward(self, current_state, action_to_take):
@@ -224,7 +311,7 @@ class CriticNetwork(nn.Module):
 
 class Rewards(Enum):
     GOAL = 500
-    CRASH = -500
+    CRASH = -2000
 
 class ReplayBuffer:
     ''' A replay buffer is used to help train the model but remove the temporal connection between states.
@@ -359,18 +446,31 @@ class NavigationNetwork(object):
 
             self.num_iter += 1
 
+        for actor_weight, target_actor_weight in zip(
+                    self.actor_network.parameters(), self.actor_network_target.parameters()
+            ):
+                actor_weight.data.copy_(
+                    target_actor_weight.data
+                )
+                
+        for critic_weight, target_critic_weight in zip(
+                self.critic_network.parameters(), self.critic_network_target.parameters()
+        ):
+            critic_weight.data.copy_(
+                target_critic_weight.data
+            )
+
 # add checkpointing
 
 # todo: add exploration noise
 
 
 def add_noise_and_scale_action(action, iteration):
-    ang_range = 0.2
+    ang_range = 0.6
     print("init action:", action)
 
-    s = 1 if iteration < 20 else .1
-    lin_noise =  np.random.normal(loc=0, scale=s/4)
-    ang_noise =  np.random.normal(loc=0, scale=s)
+    lin_noise =  np.random.normal(loc=0, scale= 1 if iteration < WARMUP_ITERATIONS else .1)
+    ang_noise =  np.random.normal(loc=0, scale= 3 if iteration < WARMUP_ITERATIONS else .3)
     action[0] += lin_noise
     action[1] += ang_noise
 
@@ -406,7 +506,7 @@ def train():
 
     my_model = NavigationNetwork(STATE_DIM, ACTION_DIM)
     my_env = Environment()
-    my_replay_buffer = ReplayBuffer(5000)
+    my_replay_buffer = ReplayBuffer(500)
     trained = False
     time.sleep(2)
     while training_iteration < MAX_ITERATIONS:
@@ -430,13 +530,12 @@ def train():
                 break
             state = new_state
         
-        if training_iteration == 20:
-            my_model.train_navigational_ddpg(my_replay_buffer, 10, batch_size=32)
-            my_replay_buffer = ReplayBuffer(500)
+        if training_iteration == WARMUP_ITERATIONS:
+            my_model.train_navigational_ddpg(my_replay_buffer, 10, batch_size=16)
 
 
-        if training_iteration > 20 and training_iteration % 5 == 0:
-            my_model.train_navigational_ddpg(my_replay_buffer, 5) # 5 iterations of batc size 32
+        if training_iteration > WARMUP_ITERATIONS:# and training_iteration % 3 == 0:
+            my_model.train_navigational_ddpg(my_replay_buffer, 5, batch_size=16) # 5 iterations of batc size 32
         print(f"FINISHED AN ITERATION {training_iteration} YAY!!! reward: {cumulative_reward}")
 
         # if training_iteration % 100 == 0: 
