@@ -8,13 +8,16 @@ from os import path
 import numpy as np
 import rospy
 from gazebo_msgs.msg import ModelState
-from geometry_msgs.msg import Twist, Point, Pose, Vector3
+from geometry_msgs.msg import Twist, Point, Pose, Vector3, Quaternion
 from gazebo_msgs.srv import SetModelState
 from sensor_msgs.msg import LaserScan, Image
 from std_srvs.srv import Empty
 import cv2
 import cv_bridge
-
+import tf
+from tf import TransformListener
+from tf import TransformBroadcaster
+from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
 
 PROJECT_NAME = 'final_project'
@@ -47,7 +50,85 @@ class Environment:
         rospy.init_node("environment")
         arguments_to_run_launchfile = ["roslaunch", PROJECT_NAME, LAUNCH_FILE_NAME]
         subprocess.Popen(arguments_to_run_launchfile)
-        time.sleep(10)
+        time.sleep(5)
+        initial_state_one = ModelState()
+        initial_state_one.model_name = 'turtlebot3'
+        initial_state_one.pose.position.x = -.25
+        initial_state_one.pose.position.y = 0
+        initial_state_one.pose.position.z = 0
+        initial_state_one.pose.orientation.x = 0
+        initial_state_one.pose.orientation.y = 0
+        initial_state_one.pose.orientation.w = 0
+
+        
+        self.model_state_pub.publish(initial_state_one)
+        print("First initial state set!")
+        
+        
+        time.sleep(2)
+        initial_state_two = ModelState()
+        initial_state_two.model_name = 'turtlebot3'
+        initial_state_two.pose.position.x = -1.2
+        initial_state_two.pose.position.y = -1.2
+        initial_state_two.pose.position.z = 0
+        initial_state_two.pose.orientation.x = 0
+        initial_state_two.pose.orientation.y = 0
+        initial_state_two.pose.orientation.w = 0
+        self.model_state_pub.publish(initial_state_two)
+        print("Second initial state published")
+
+        time.sleep(2)
+        cur_quat = quaternion_from_euler(0, 0, 0)
+        initial_state_three = ModelState()
+        initial_state_three.model_name = 'turtlebot3'
+        initial_state_three.pose.position.x = -.3
+        initial_state_three.pose.position.y = 1.3
+        initial_state_three.pose.position.z = 0
+        initial_state_three.pose.orientation.x = cur_quat[0]
+        initial_state_three.pose.orientation.y = cur_quat[1]
+        initial_state_three.pose.orientation.w = cur_quat[2]
+        initial_state_three.pose.orientation.z = cur_quat[3]
+
+        time.sleep(2)
+        time.sleep(2)
+        cur_quat = quaternion_from_euler(0, 0, math.pi/2)
+        initial_state_four = ModelState()
+        initial_state_four.model_name = 'turtlebot3'
+        initial_state_four.pose.position.x = -.25
+        initial_state_four.pose.position.y = -1.2
+        initial_state_four.pose.position.z = 0
+        initial_state_four.pose.orientation.x = cur_quat[0]
+        initial_state_four.pose.orientation.y = cur_quat[1]
+        initial_state_four.pose.orientation.w = cur_quat[2]
+        initial_state_four.pose.orientation.z = cur_quat[3]
+        self.model_state_pub.publish(initial_state_four)
+        print('fourth state is published')
+        
+        time.sleep(2)
+        cur_quat = quaternion_from_euler(0, 0, -math.pi/4)
+
+        initial_state_five = ModelState()
+        initial_state_five.model_name = 'turtlebot3'
+        initial_state_five.pose.position.x = .95
+        initial_state_five.pose.position.y = 1.3
+        initial_state_five.pose.position.z = 0
+        initial_state_five.pose.orientation.x = cur_quat[0]
+        initial_state_five.pose.orientation.y = cur_quat[1]
+        initial_state_five.pose.orientation.w = cur_quat[2]
+        initial_state_five.pose.orientation.z = cur_quat[3]
+        self.model_state_pub.publish(initial_state_five)
+
+        print('turtle bot spawned on top??')
+
+
+
+
+        
+
+
+
+
+
 
     def store_scan_vals(self, scan_data):
         self.ranges = list(scan_data.ranges)
@@ -144,6 +225,65 @@ class Environment:
             current_subsample = self.ranges[i * 10: i * 10 + 10]
             condensed_states.append(np.median(current_subsample))
         return condensed_states
+    
+    def reset_model_position_randomly(self):
+        initial_state_one = ModelState()
+        initial_state_one.model_name = 'turtlebot3'
+        initial_state_one.pose.position.x = -.25
+        initial_state_one.pose.position.y = 0
+        initial_state_one.pose.position.z = 0
+        initial_state_one.pose.orientation.x = 0
+        initial_state_one.pose.orientation.y = 0
+        initial_state_one.pose.orientation.w = 0
+
+        initial_state_two = ModelState()
+        initial_state_two.model_name = 'turtlebot3'
+        initial_state_two.pose.position.x = -1.2
+        initial_state_two.pose.position.y = -1.2
+        initial_state_two.pose.position.z = 0
+        initial_state_two.pose.orientation.x = 0
+        initial_state_two.pose.orientation.y = 0
+        initial_state_two.pose.orientation.w = 0
+
+        cur_quat = quaternion_from_euler(0, 0, 0)
+        initial_state_three = ModelState()
+        initial_state_three.model_name = 'turtlebot3'
+        initial_state_three.pose.position.x = -.3
+        initial_state_three.pose.position.y = 1.3
+        initial_state_three.pose.position.z = 0
+        initial_state_three.pose.orientation.x = cur_quat[0]
+        initial_state_three.pose.orientation.y = cur_quat[1]
+        initial_state_three.pose.orientation.w = cur_quat[2]
+        initial_state_three.pose.orientation.z = cur_quat[3]
+
+        cur_quat = quaternion_from_euler(0, 0, math.pi/2)
+        initial_state_four = ModelState()
+        initial_state_four.model_name = 'turtlebot3'
+        initial_state_four.pose.position.x = -.25
+        initial_state_four.pose.position.y = -1.2
+        initial_state_four.pose.position.z = 0
+        initial_state_four.pose.orientation.x = cur_quat[0]
+        initial_state_four.pose.orientation.y = cur_quat[1]
+        initial_state_four.pose.orientation.w = cur_quat[2]
+        initial_state_four.pose.orientation.z = cur_quat[3]
+
+        cur_quat = quaternion_from_euler(0, 0, -math.pi/4)
+        initial_state_five = ModelState()
+        initial_state_five.model_name = 'turtlebot3'
+        initial_state_five.pose.position.x = .95
+        initial_state_five.pose.position.y = 1.3
+        initial_state_five.pose.position.z = 0
+        initial_state_five.pose.orientation.x = cur_quat[0]
+        initial_state_five.pose.orientation.y = cur_quat[1]
+        initial_state_five.pose.orientation.w = cur_quat[2]
+        initial_state_five.pose.orientation.z = cur_quat[3]
+        
+        
+        arr_of_states = [initial_state_one, initial_state_two, initial_state_three, initial_state_four, initial_state_five]
+        
+        self.model_state_pub.publish(np.random.choice(arr_of_states))
+
+
 
     def reset_the_world(self):
         # returns initial state and that its not done simming
@@ -151,9 +291,11 @@ class Environment:
         self.vel.linear.x = 0
         self.vel.angular.z = 0
         self.velocity_publisher.publish(self.vel)
-        time.sleep(1)
+        time.sleep(.1)
         self.reset_world()
-        time.sleep(1)
+        time.sleep(.5)
+        self.reset_model_position_randomly()
+        time.sleep(.5)
         self.pause()
         time.sleep(1)
         current_state = self.generate_state_from_scan()
