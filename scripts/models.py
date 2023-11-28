@@ -19,7 +19,7 @@ import cv_bridge
 
 PROJECT_NAME = 'final_project'
 LAUNCH_FILE_NAME = 'modified_maze.launch'
-
+# TODO: make hidden layer smaller
 class Environment:
     def __init__(self):
         self.bridge = cv_bridge.CvBridge()
@@ -101,14 +101,14 @@ class Environment:
             return 500000
 
         if self.is_at_wall():
-            return -5000
+            return -200
 
         # Greatly penalize small turn values (slow == bad), penalize all turns & greater reward for large linear speeds!
         # if linear_speed < .1:
         #     linear_reward = -.05
         # else:
-        linear_reward = linear_speed * 500
-        turn_reward = -abs(absolute_turn_speed) * 50
+        linear_reward = linear_speed * 200
+        turn_reward = -abs(absolute_turn_speed) * 125
         # if absolute_turn_speed == 0:
         #     turn_reward = 0
         # elif absolute_turn_speed < .2:
@@ -180,7 +180,7 @@ MAX_ANGULAR_VEL = 1.86
 MIN_ANGULAR_VEL = -1.86
 ACTOR_LEARNING_RATE = .0001
 CRITIC_LEARNING_RATE =  .001
-TAU = .05
+TAU = .001
 BUFFER_SIZE = 1500
 MAX_ITERATIONS = 50000
 MAX_ITERATION_STEPS = 1000
@@ -192,7 +192,7 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.actor_network = nn.Sequential(
             nn.Linear(state_shape, 2048),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Linear(2048, 512),
             nn.ReLU(),
             nn.Linear(512, action_shape),
@@ -211,7 +211,7 @@ class CriticNetwork(nn.Module):
             nn.Linear(state_shape + action_shape, 2048),
             nn.ReLU(),
             nn.Linear(2048, 1024),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Linear(1024, 1)
         )
 
@@ -279,8 +279,8 @@ class NavigationNetwork(object):
         self.critic_network = CriticNetwork(state_shape, action_shape).to(DEVICE)
         
         # init optimizers for actor-critic network
-        self.actor_ADAM = torch.optim.Adam(self.actor_network.parameters(), lr=0.001)
-        self.critic_ADAM = torch.optim.Adam(self.critic_network.parameters())
+        self.actor_ADAM = torch.optim.Adam(self.actor_network.parameters(), lr=0.003)
+        self.critic_ADAM = torch.optim.Adam(self.critic_network.parameters(), lr=0.02)
 
         # target network starts the same as regular networks
         self.actor_network_target = ActorNetwork(state_shape, action_shape).to(DEVICE)
@@ -326,10 +326,11 @@ class NavigationNetwork(object):
             noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(DEVICE)
             next_action = self.actor_network(next_state)
             target_Q = self.critic_network_target(next_state, next_action)
-            target_Q = current_action_reward.detach().cpu().numpy() + (cycle_finished.detach().cpu().numpy().flatten() *  target_Q.detach().cpu().numpy().flatten())
+            target_Q = current_action_reward.detach().cpu().numpy() + ( (1 - cycle_finished.detach().cpu().numpy().flatten()) * gamma *  target_Q.detach().cpu().numpy().flatten())
             target_Q = torch.unsqueeze(torch.tensor(target_Q), 1).to(DEVICE)
             current_Q = self.critic_network(current_state, current_action)
             assert target_Q.size()==current_Q.size()
+            print(f"current q: {current_Q}, target q: {target_Q}")
 
             critic_loss = F.mse_loss(current_Q, target_Q)
             self.critic_ADAM.zero_grad()
@@ -353,7 +354,7 @@ class NavigationNetwork(object):
                     self.critic_network.parameters(), self.critic_network_target.parameters()
             ):
                 target_critic_weight.data.copy_(
-                    TAU * critic_weight.data + (1 - TAU) * critic_weight.data
+                    TAU * critic_weight.data + (1 - TAU) *  target_critic_weight.data
                 )
 
             self.num_iter += 1
@@ -363,17 +364,19 @@ class NavigationNetwork(object):
 # todo: add exploration noise
 
 
-def add_noise_and_scale_action(action):
-    ang_range = 0.3
+def add_noise_and_scale_action(action, iteration):
+    ang_range = 0.2
     print("init action:", action)
-    action[0] = (action[0] + 1) * .13
-    action[1] *= ang_range # 1.86
-    lin_noise = 0 # np.random.normal(loc=0, scale=0.1)
-    ang_noise = 0 # np.random.normal(loc=0, scale=0.05)
+
+    s = 1 if iteration < 20 else .1
+    lin_noise =  np.random.normal(loc=0, scale=s/4)
+    ang_noise =  np.random.normal(loc=0, scale=s)
     action[0] += lin_noise
     action[1] += ang_noise
 
     print("scale and noise action:", action)
+    action[0] = (action[0] + 1) * .13
+    action[1] *= ang_range # 1.86
     action[0] = action[0].clip(0.03,0.26)
     action[1] = action[1].clip(-ang_range,ang_range)
     return action
@@ -403,17 +406,17 @@ def train():
 
     my_model = NavigationNetwork(STATE_DIM, ACTION_DIM)
     my_env = Environment()
-    my_replay_buffer = ReplayBuffer(BUFFER_SIZE)
+    my_replay_buffer = ReplayBuffer(5000)
+    trained = False
     time.sleep(2)
     while training_iteration < MAX_ITERATIONS:
 
         state, done = my_env.reset_the_world()     
         cumulative_reward = 0
-        my_replay_buffer = ReplayBuffer(BUFFER_SIZE)
 
         for it in range(1200):
             action_to_perform = my_model.determine_current_action(state)
-            action_to_perform = add_noise_and_scale_action(action_to_perform)
+            action_to_perform = add_noise_and_scale_action(action_to_perform, iteration=training_iteration)
             print(f"it: {it} wall: {my_env.is_at_wall()}, target: {my_env.is_at_target()} action: {action_to_perform}")
             
             new_state, done, reward = my_env.perform_action(action_to_perform)
@@ -427,11 +430,17 @@ def train():
                 break
             state = new_state
         
-        my_model.train_navigational_ddpg(my_replay_buffer, it)
-        print(f"FINISHED AN ITERATION YAY!!! reward: {cumulative_reward}")
+        if training_iteration == 20:
+            my_model.train_navigational_ddpg(my_replay_buffer, 10, batch_size=32)
+            my_replay_buffer = ReplayBuffer(500)
 
-        if training_iteration % 100: 
-            my_model.save(f"models/iteration{training_iteration}")
 
+        if training_iteration > 20 and training_iteration % 5 == 0:
+            my_model.train_navigational_ddpg(my_replay_buffer, 5) # 5 iterations of batc size 32
+        print(f"FINISHED AN ITERATION {training_iteration} YAY!!! reward: {cumulative_reward}")
+
+        # if training_iteration % 100 == 0: 
+        #     my_model.save(f"models/iteration{training_iteration}")
+        training_iteration += 1
 if __name__ == "__main__":
     train()
