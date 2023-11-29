@@ -5,6 +5,7 @@ import subprocess
 import time
 from os import path
 import os
+import sys
 from math import atan2
 
 import numpy as np
@@ -93,14 +94,15 @@ class Environment:
         if M_blue['m00'] == 0:
             self.blue_x = 0
             self.blue_y = 0
-            return (False, 0)
+            return (False, 200)
 
         elif M_blue['m00'] != 0:
-            print('mask detected')
             self.blue_x = int(M_blue['m10']/M_blue['m00'])
             self.blue_y = int(M_blue['m01']/M_blue['m00'])
         goal_x = image_x / 2
         dx = np.fabs(goal_x - self.blue_x)
+        print('mask detected', dx)
+
 
         if dx < 50 and self.ranges[0] < .5:
             print("REWARDED.")
@@ -121,7 +123,7 @@ class Environment:
             self.odom.orientation.w])[2]
 
         theta_diff = abs(theo_theta - theta)
-        print(f"THETA DIFF: {theta_diff}, THEO: {theo_theta}, ACC: {theta}")
+        # print(f"THETA DIFF: {theta_diff}, THEO: {theo_theta}, ACC: {theta}")
         
         at_target, dx = self.is_at_target()
         if at_target:
@@ -134,9 +136,9 @@ class Environment:
         # if linear_speed < .1:
         #     linear_reward = -.05
         # else:
-        linear_reward = linear_speed * 2
-        turn_reward =  -abs(absolute_turn_speed) * 1
-        goal_reward = dx 
+        linear_reward = linear_speed * 500
+        turn_reward =  -abs(absolute_turn_speed) * 50
+        goal_reward = max(200-dx,0)
         dist_reward = 0 # -dist_to_goal * 20
         theta_reward = 0 # -20 * theta_diff
         # if absolute_turn_speed == 0:
@@ -279,23 +281,23 @@ MAX_ANGULAR_VEL = 1.86
 MIN_ANGULAR_VEL = -1.86
 ACTOR_LEARNING_RATE = .0001
 CRITIC_LEARNING_RATE =  .001
-TAU = .005
+TAU = .001
 BUFFER_SIZE = 1500
 MAX_ITERATIONS = 50000
 MAX_ITERATION_STEPS = 1000
 GAMMA = .995
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-WARMUP_ITERATIONS = 20
+WARMUP_ITERATIONS = 250
 
 class ActorNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(ActorNetwork, self).__init__()
         self.actor_network = nn.Sequential(
-            nn.Linear(state_shape, 32),
+            nn.Linear(state_shape, 16),
             nn.ReLU(),
-            nn.Linear(32, 64),
+            nn.Linear(16, 32),
             nn.ReLU(),
-            nn.Linear(64, action_shape),
+            nn.Linear(32, action_shape),
             nn.Tanh()
         )
 
@@ -308,9 +310,9 @@ class CriticNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(CriticNetwork, self).__init__()
         self.critic_network = nn.Sequential(
-            nn.Linear(state_shape + action_shape, 32),
+            nn.Linear(state_shape + action_shape, 16),
             nn.ReLU(),
-            nn.Linear(32, 64),
+            nn.Linear(16, 64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
@@ -361,7 +363,7 @@ class ReplayBuffer:
     
     def sample(self, n_samples: int) -> list:
         indices = np.random.choice(list(self.valid_indices), min(len(self.valid_indices), n_samples))
-        # TODO: make sure no None in this list
+
         return (
             [self.states[i] for i in indices],
             [self.actions[i] for i in indices],
@@ -394,7 +396,7 @@ class NavigationNetwork(object):
 
     def save(self, path):
         print(os.getcwd())
-        print("SAVING TO PATH:", path)
+        # print("SAVING TO PATH:", path)
         os.makedirs(path, exist_ok=True)
         torch.save(self.actor_network.state_dict(), path+"/actor")
         torch.save(self.critic_network.state_dict(), path+"/critic")
@@ -445,7 +447,7 @@ class NavigationNetwork(object):
             noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(DEVICE)
             next_action = self.actor_network(next_state)
             target_Q = self.critic_network_target(next_state, next_action)
-            target_Q = current_action_reward.detach().cpu().numpy() + ( (1 - cycle_finished.detach().cpu().numpy().flatten()) * .9 *  target_Q.detach().cpu().numpy().flatten())
+            target_Q = current_action_reward.detach().cpu().numpy() + ( (1 - cycle_finished.detach().cpu().numpy().flatten()) * 1 *  target_Q.detach().cpu().numpy().flatten())
             target_Q = torch.unsqueeze(torch.tensor(target_Q), 1).to(DEVICE)
             current_Q = self.critic_network(current_state, current_action)
             assert target_Q.size()==current_Q.size()
@@ -498,19 +500,20 @@ class NavigationNetwork(object):
 def add_noise_and_scale_action(action, iteration, add_noise=True):
     ang_range = 0.6
     print("init action:", action)
-    print("scale and noise action:", action)
     action[0] = (action[0] + 1) * .13
     action[1] *= ang_range # 1.86
 
+    print("scale and noise action:", action)
+
     if add_noise:
         lin_noise =  np.random.normal(loc=0, scale=.1)
-        ang_noise =  np.random.normal(loc=0, scale=.3)
+        ang_noise =  np.random.normal(loc=0, scale=1.2 if iteration < WARMUP_ITERATIONS else .6)
         # noise_scale = 1-(iteration/100)
         # lin_noise +=  np.random.uniform(-1,1) * noise_scale
         # ang_noise +=  np.random.uniform(-1,1) * noise_scale
         action[0] += lin_noise
         action[1] += ang_noise
-    action[0] = action[0].clip(0.05,0.25)
+    action[0] = action[0].clip(0.00,0.25)
     action[1] = action[1].clip(-ang_range,ang_range)
     return action
     # TODO: do we want different distributions for the noise of linear vs angular?
@@ -565,6 +568,11 @@ def train():
 
         escaping = False
         escape_vol = None
+
+        # if training_iteration > WARMUP_ITERATIONS:
+        #     my_replay_buffer = ReplayBuffer(NUM_ITS)
+
+        temp = []
         for it in range(NUM_ITS):
             # print("init action:", action_to_perform)
             # lin_noise =  np.random.normal(loc=0, scale=.1 if training_iteration < WARMUP_ITERATIONS else .01)
@@ -583,12 +591,12 @@ def train():
                 turn_range = .4
                 if min(my_env.ranges[:range_val]) < turn_range or min(my_env.ranges[-range_val:]) < turn_range:
                     print(" ESCAPING ")
-                    if True:#not escaping:
-                        escape_vol_lin = 0.00#np.random.uniform(.05,.25)
+                    if not escaping:
+                        escape_vol_lin = np.random.uniform(0,.05)
                         if sum(my_env.ranges[-90: -range_val]) > sum(my_env.ranges[range_val:90]):
-                            escape_vol_ang = np.random.uniform(-.8,-.4)
+                            escape_vol_ang = np.random.uniform(-.6,-.4)
                         else:
-                            escape_vol_ang = np.random.uniform(.4,.8)
+                            escape_vol_ang = np.random.uniform(.4,.6)
                         # escape_vol_ang = np.random.uniform(-.8,.8)
                         escaping = True
                     action_to_perform[0] = escape_vol_lin
@@ -602,7 +610,7 @@ def train():
                 print("MODEL NAVIGATION")
 
 
-            print(f"it: {it} wall: {my_env.is_at_wall()}, target: {my_env.is_at_target()[0]} action: {action_to_perform}")
+            print(f"it: {it} wall: {my_env.is_at_wall()}, target: {my_env.is_at_target()[0]} action: {action_to_perform}\n pos:{my_env.get_odom_list()}")
             
             new_state, done, reward = my_env.perform_action(action_to_perform)
             print("DONE:", done)
@@ -611,23 +619,35 @@ def train():
             elif reward  == Rewards.CRASH:
                 print("CRASH CRASH CRASH")
             cumulative_reward += reward
-            my_replay_buffer.add(state, action_to_perform, reward, done, new_state)
+            temp.append((state, action_to_perform, reward, done, new_state))
+            # my_replay_buffer.add(state, action_to_perform, reward, done, new_state)
+            # if reward > 1000:
+            #     my_replay_buffer.add(state, action_to_perform, reward, done, new_state)
+
             if done:
                 break
             state = new_state
-        
-        if training_iteration == WARMUP_ITERATIONS:
-            my_model.train_navigational_ddpg(my_replay_buffer, WARMUP_ITERATIONS * 8, batch_size=64)
-            my_replay_buffer = ReplayBuffer(size=300)
+        for (state, action_to_perform, reward, done, new_state) in temp:
+            my_replay_buffer.add(state, action_to_perform, cumulative_reward, done, new_state)
 
+        if training_iteration == WARMUP_ITERATIONS:
+            my_model.train_navigational_ddpg(my_replay_buffer, WARMUP_ITERATIONS * 8, batch_size=32)
+            my_replay_buffer = ReplayBuffer(size=300)
+            # resample = my_replay_buffer.sample(1000)
+            # for tup in zip(*resample):
+            #     my_replay_buffer2.add(*tup)
+            #     my_replay_buffer = my_replay_buffer2
         elif training_iteration > WARMUP_ITERATIONS + 5:# and training_iteration % 3 == 0:
-            my_model.train_navigational_ddpg(my_replay_buffer, 3, batch_size=64) # 5 iterations of batc size 32
+            my_model.train_navigational_ddpg(my_replay_buffer, 2, batch_size=32) # 5 iterations of batc size 32
         print(f"FINISHED AN ITERATION {training_iteration} YAY!!! reward: {cumulative_reward}")
 
         if training_iteration % 5 == 0: 
             my_model.save(f"models/iteration{training_iteration}")
-            print("SAVED MODEL")
+            # print("SAVED MODEL")
         training_iteration += 1
 if __name__ == "__main__":
-    train()
-    # eval(170)
+    if len(sys.argv) > 1:
+        eval(int(sys.argv[1]))
+    else:
+        train()  
+    # eval(170)        train()    # eval(170)
