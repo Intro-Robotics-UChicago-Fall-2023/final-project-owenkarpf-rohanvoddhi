@@ -138,7 +138,7 @@ class Environment:
         # else:
         linear_reward = linear_speed * 500
         turn_reward =  -abs(absolute_turn_speed) * 50
-        goal_reward = max(200-dx,0)
+        goal_reward = max(100-dx/2,0) * 10
         dist_reward = 0 # -dist_to_goal * 20
         theta_reward = 0 # -20 * theta_diff
         # if absolute_turn_speed == 0:
@@ -279,25 +279,26 @@ MIN_LINEAR_VEL = 0
 seed = 96024
 MAX_ANGULAR_VEL = 1.86
 MIN_ANGULAR_VEL = -1.86
-ACTOR_LEARNING_RATE = .0001
-CRITIC_LEARNING_RATE =  .001
+ACTOR_LEARNING_RATE = .00004
+CRITIC_LEARNING_RATE =  .0005
 TAU = .001
 BUFFER_SIZE = 1500
 MAX_ITERATIONS = 50000
 MAX_ITERATION_STEPS = 1000
 GAMMA = .995
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-WARMUP_ITERATIONS = 250
-
+WARMUP_ITERATIONS = 100
+LAYER_1 = 25000
+LAYER_2 = 320
 class ActorNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(ActorNetwork, self).__init__()
         self.actor_network = nn.Sequential(
-            nn.Linear(state_shape, 16),
+            nn.Linear(state_shape, LAYER_1),
             nn.ReLU(),
-            nn.Linear(16, 32),
+            nn.Linear(LAYER_1, LAYER_2),
             nn.ReLU(),
-            nn.Linear(32, action_shape),
+            nn.Linear(LAYER_2, action_shape),
             nn.Tanh()
         )
 
@@ -310,11 +311,11 @@ class CriticNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(CriticNetwork, self).__init__()
         self.critic_network = nn.Sequential(
-            nn.Linear(state_shape + action_shape, 16),
+            nn.Linear(state_shape + action_shape, LAYER_1),
             nn.ReLU(),
-            nn.Linear(16, 64),
+            nn.Linear(LAYER_1, LAYER_2),
             nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Linear(LAYER_2, 1)
         )
 
     def forward(self, current_state, action_to_take):
@@ -381,8 +382,8 @@ class NavigationNetwork(object):
         self.critic_network = CriticNetwork(state_shape, action_shape).to(DEVICE)
         
         # init optimizers for actor-critic network
-        self.actor_ADAM = torch.optim.Adam(self.actor_network.parameters(), lr=0.003)
-        self.critic_ADAM = torch.optim.Adam(self.critic_network.parameters(), lr=0.02)
+        self.actor_ADAM = torch.optim.Adam(self.actor_network.parameters(), lr=ACTOR_LEARNING_RATE)
+        self.critic_ADAM = torch.optim.Adam(self.critic_network.parameters(), lr=CRITIC_LEARNING_RATE)
 
         # target network starts the same as regular networks
         self.actor_network_target = ActorNetwork(state_shape, action_shape).to(DEVICE)
@@ -462,19 +463,20 @@ class NavigationNetwork(object):
             actor_grad.backward()
             self.actor_ADAM.step()
 
-            for actor_weight, target_actor_weight in zip(
-                    self.actor_network.parameters(), self.actor_network_target.parameters()
-            ):
-                target_actor_weight.data.copy_(
-                    TAU * actor_weight.data + (1 - TAU) * target_actor_weight.data
-                )
-                
-            for critic_weight, target_critic_weight in zip(
-                    self.critic_network.parameters(), self.critic_network_target.parameters()
-            ):
-                target_critic_weight.data.copy_(
-                    TAU * critic_weight.data + (1 - TAU) *  target_critic_weight.data
-                )
+            if iter % 4 == 0:
+                for actor_weight, target_actor_weight in zip(
+                        self.actor_network.parameters(), self.actor_network_target.parameters()
+                ):
+                    target_actor_weight.data.copy_(
+                        TAU * actor_weight.data + (1 - TAU) * target_actor_weight.data
+                    )
+                    
+                for critic_weight, target_critic_weight in zip(
+                        self.critic_network.parameters(), self.critic_network_target.parameters()
+                ):
+                    target_critic_weight.data.copy_(
+                        TAU * critic_weight.data + (1 - TAU) *  target_critic_weight.data
+                    )
 
             self.num_iter += 1
 
@@ -506,14 +508,14 @@ def add_noise_and_scale_action(action, iteration, add_noise=True):
     print("scale and noise action:", action)
 
     if add_noise:
-        lin_noise =  np.random.normal(loc=0, scale=.1)
-        ang_noise =  np.random.normal(loc=0, scale=1.2 if iteration < WARMUP_ITERATIONS else .6)
+        lin_noise =  np.random.normal(loc=0, scale=.05)
+        ang_noise =  np.random.normal(loc=0, scale=1.5 if iteration < WARMUP_ITERATIONS else .8)
         # noise_scale = 1-(iteration/100)
         # lin_noise +=  np.random.uniform(-1,1) * noise_scale
         # ang_noise +=  np.random.uniform(-1,1) * noise_scale
         action[0] += lin_noise
         action[1] += ang_noise
-    action[0] = action[0].clip(0.00,0.25)
+    action[0] = action[0].clip(0.01,0.25)
     action[1] = action[1].clip(-ang_range,ang_range)
     return action
     # TODO: do we want different distributions for the noise of linear vs angular?
@@ -522,8 +524,8 @@ def evaluate(env, model):
     state, done = env.reset_the_world()     
     total_reward = 0
     for it in range(1200):
-        action_to_perform = model.determine_current_action(state)
-        action_to_perform = add_noise_and_scale_action(action_to_perform,it, add_noise=False)
+        model_action = model.determine_current_action(state)
+        action_to_perform = add_noise_and_scale_action(model_action.copy(),it, add_noise=False)
 
         new_state, done, reward = env.perform_action(action_to_perform)
         total_reward += reward
@@ -568,7 +570,7 @@ def train():
 
         escaping = False
         escape_vol = None
-
+        try_escape = bool(np.random.randint(0,2))
         # if training_iteration > WARMUP_ITERATIONS:
         #     my_replay_buffer = ReplayBuffer(NUM_ITS)
 
@@ -581,12 +583,12 @@ def train():
             # ang_noise += ang_noise
             # action_to_perform[0] += (base_lin_noise)
             # action_to_perform[1] += (base_ang_noise)
-            action_to_perform = my_model.determine_current_action(state)
-            action_to_perform = add_noise_and_scale_action(action_to_perform, iteration=training_iteration)
+            model_action = my_model.determine_current_action(state)
+            action_to_perform = add_noise_and_scale_action(model_action.copy(), iteration=training_iteration)
 
 
             # IF TOO CLOSE:
-            if training_iteration < WARMUP_ITERATIONS:
+            if try_escape and training_iteration < WARMUP_ITERATIONS:
                 range_val = 20
                 turn_range = .4
                 if min(my_env.ranges[:range_val]) < turn_range or min(my_env.ranges[-range_val:]) < turn_range:
@@ -619,7 +621,7 @@ def train():
             elif reward  == Rewards.CRASH:
                 print("CRASH CRASH CRASH")
             cumulative_reward += reward
-            temp.append((state, action_to_perform, reward, done, new_state))
+            temp.append((state, model_action, reward, done, new_state))
             # my_replay_buffer.add(state, action_to_perform, reward, done, new_state)
             # if reward > 1000:
             #     my_replay_buffer.add(state, action_to_perform, reward, done, new_state)
@@ -627,21 +629,21 @@ def train():
             if done:
                 break
             state = new_state
-        for (state, action_to_perform, reward, done, new_state) in temp:
-            my_replay_buffer.add(state, action_to_perform, cumulative_reward, done, new_state)
+        for (state, model_action, reward, done, new_state) in temp:
+            my_replay_buffer.add(state, model_action, cumulative_reward, done, new_state)
 
         if training_iteration == WARMUP_ITERATIONS:
-            my_model.train_navigational_ddpg(my_replay_buffer, WARMUP_ITERATIONS * 8, batch_size=32)
-            my_replay_buffer = ReplayBuffer(size=300)
+            my_model.train_navigational_ddpg(my_replay_buffer, WARMUP_ITERATIONS * 16, batch_size=32)
+            my_replay_buffer = ReplayBuffer(size=2000)
             # resample = my_replay_buffer.sample(1000)
             # for tup in zip(*resample):
             #     my_replay_buffer2.add(*tup)
             #     my_replay_buffer = my_replay_buffer2
         elif training_iteration > WARMUP_ITERATIONS + 5:# and training_iteration % 3 == 0:
-            my_model.train_navigational_ddpg(my_replay_buffer, 2, batch_size=32) # 5 iterations of batc size 32
+            my_model.train_navigational_ddpg(my_replay_buffer, 5, batch_size=64) # 5 iterations of batc size 32
         print(f"FINISHED AN ITERATION {training_iteration} YAY!!! reward: {cumulative_reward}")
 
-        if training_iteration % 5 == 0: 
+        if training_iteration % 50 == 0: 
             my_model.save(f"models/iteration{training_iteration}")
             # print("SAVED MODEL")
         training_iteration += 1
