@@ -26,8 +26,6 @@ from tf.transformations import quaternion_from_euler, euler_from_quaternion
 PROJECT_NAME = 'final_project'
 LAUNCH_FILE_NAME = 'modified_maze.launch'
 
-MAX_ANGULAR_VEL
-
 class Environment:
     def __init__(self):
         # initialize the enviroment
@@ -282,7 +280,9 @@ MAX_ITERATIONS = 50000
 MAX_ITERATION_STEPS = 1500
 GAMMA = .9
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-WARMUP_ITERATIONS = 30
+WARMUP_ITERATIONS = 5
+TRAIN_ITERATION_LAG = 1
+
 
 class ActorNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
@@ -603,7 +603,6 @@ def train():
         for (state, action_to_perform, reward, done, new_state) in temp:
             my_replay_buffer.add(state, action_to_perform, reward, done, new_state)
 
-        TRAIN_ITERATION_LAG = 5
         if training_iteration > WARMUP_ITERATIONS and training_iteration % TRAIN_ITERATION_LAG == 0:
             my_model.train_navigational_ddpg(my_replay_buffer, TRAIN_ITERATION_LAG, batch_size=128)
             # resample = my_replay_buffer.sample(1000)
@@ -612,7 +611,7 @@ def train():
             #     my_replay_buffer = my_replay_buffer2
         print(f"FINISHED AN ITERATION {training_iteration} YAY!!! reward: {cumulative_reward}")
 
-        if training_iteration % 5 == 0: 
+        if training_iteration % 25 == 0: 
             my_model.save(f"models/iteration{training_iteration}")
             # print("SAVED MODEL")
         training_iteration += 1
