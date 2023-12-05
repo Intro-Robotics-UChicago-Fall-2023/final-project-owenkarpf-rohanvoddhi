@@ -26,6 +26,8 @@ from tf.transformations import quaternion_from_euler, euler_from_quaternion
 PROJECT_NAME = 'final_project'
 LAUNCH_FILE_NAME = 'modified_maze.launch'
 
+MAX_ANGULAR_VEL
+
 class Environment:
     def __init__(self):
         # initialize the enviroment
@@ -145,7 +147,7 @@ class Environment:
     def perform_action(self, action):
         # perform the action, return the state after moving robot along with the world being done (robot hit wall or reached goal) and current reward
         new_linear_vel, new_angular_vel = action
-        print(f'The new linear velocity is {new_linear_vel}')
+        print(f'PERFORMING. linear: {new_linear_vel} angularr: {new_angular_vel}')
         self.vel.linear.x = new_linear_vel
         self.vel.angular.z = new_angular_vel
         self.velocity_publisher.publish(self.vel)
@@ -267,10 +269,10 @@ from numpy import inf
 ODOM_DIM = 6
 STATE_DIM = 36
 ACTION_DIM = 2
-MAX_LINEAR_VEL = .26
+MAX_LINEAR_VEL = .2
 MIN_LINEAR_VEL = 0
 seed = 96024
-MAX_ANGULAR_VEL = 1.2
+MAX_ANGULAR_VEL = .6
 MIN_ANGULAR_VEL = -1.2
 ACTOR_LEARNING_RATE = .0004
 CRITIC_LEARNING_RATE =  0.00001
@@ -280,7 +282,7 @@ MAX_ITERATIONS = 50000
 MAX_ITERATION_STEPS = 1500
 GAMMA = .9
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-WARMUP_ITERATIONS = 0
+WARMUP_ITERATIONS = 30
 
 class ActorNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
@@ -295,7 +297,8 @@ class ActorNetwork(nn.Module):
         )
 
     def forward(self, current_state):
-        actions = self.actor_network(current_state)
+        actions[0] = (actions[0] + 1) * MAX_LINEAR_VEL/2
+        actions[1] = actions[1] * MAX_ANGULAR_VEL
         return actions
 
 
@@ -492,12 +495,11 @@ class NavigationNetwork(object):
 
 
 def add_noise_and_scale_action(action, iteration=30000, add_noise=True):
-    ang_range = MAX_ANGULAR_VEL
     # print("init action:", action)
     new_action = np.zeros(2)
 
-    new_action[0] = (action[0] + 1) * .13
-    new_action[1] = action[1] * ang_range 
+    new_action[0] = action[0]
+    new_action[1] = action[1]
 
     # print("scale and noise action:", action)
 
@@ -509,8 +511,14 @@ def add_noise_and_scale_action(action, iteration=30000, add_noise=True):
         # ang_noise +=  np.random.uniform(-1,1) * noise_scale
         new_action[0] += lin_noise
         new_action[1] += ang_noise
-    new_action[0] = new_action[0].clip(0.00,0.26)
-    new_action[1] = new_action[1].clip(-ang_range,ang_range)
+    new_action[0] = new_action[0].clip(0.00,MAX_LINEAR_VEL)
+    new_action[1] = new_action[1].clip(-MAX_ANGULAR_VEL,MAX_ANGULAR_VEL)
+    return new_action
+
+def get_random_action():
+    new_action = np.zeros(2)
+    new_action[0] = np.random.uniform(0,MAX_LINEAR_VEL)
+    new_action[1] = np.random.uniform(-MAX_ANGULAR_VEL, MAX_ANGULAR_VEL)
     return new_action
 
 
@@ -520,8 +528,6 @@ def evaluate(env, model):
     total_reward = 0
     for it in range(1200):
         action_to_perform = model.determine_current_action(state)
-        action_to_perform = add_noise_and_scale_action(action_to_perform,it, add_noise=False)
-
         new_state, done, reward = env.perform_action(action_to_perform)
         total_reward += reward
         if reward == Rewards.GOAL:
@@ -571,12 +577,16 @@ def train():
             # ang_noise += ang_noise
             # action_to_perform[0] += (base_lin_noise)
             # action_to_perform[1] += (base_ang_noise)
-            action_to_perform = my_model.determine_current_action(state)
-            new_action_to_perform = add_noise_and_scale_action(action_to_perform, iteration=training_iteration)            
+            if it > WARMUP_ITERATIONS:
+                action_to_perform = my_model.determine_current_action(state)
+                action_to_perform = add_noise_and_scale_action(action_to_perform, iteration=training_iteration)            
+
+            else:
+                action_to_perform = get_random_action()
 
             # print(f"it: {it} wall: {my_env.is_at_wall()}, target: {my_env.is_at_target()[0]} action: {action_to_perform}\n pos:{my_env.get_odom_list()}")
             
-            new_state, done, reward = my_env.perform_action(new_action_to_perform)
+            new_state, done, reward = my_env.perform_action(action_to_perform)
             print("DONE:", done)
             if reward == Rewards.GOAL:
                 print("DONE DONE DONE")
@@ -584,6 +594,7 @@ def train():
                 print("CRASH CRASH CRASH")
             cumulative_reward += reward
             temp.append((state, action_to_perform, reward, done, new_state))
+            # TODO: use final reward?
             
 
             if done:
@@ -592,8 +603,9 @@ def train():
         for (state, action_to_perform, reward, done, new_state) in temp:
             my_replay_buffer.add(state, action_to_perform, reward, done, new_state)
 
-        if training_iteration > 5:
-            my_model.train_navigational_ddpg(my_replay_buffer, 2, batch_size=32)
+        TRAIN_ITERATION_LAG = 5
+        if training_iteration > WARMUP_ITERATIONS and training_iteration % TRAIN_ITERATION_LAG == 0:
+            my_model.train_navigational_ddpg(my_replay_buffer, TRAIN_ITERATION_LAG, batch_size=128)
             # resample = my_replay_buffer.sample(1000)
             # for tup in zip(*resample):
             #     my_replay_buffer2.add(*tup)
