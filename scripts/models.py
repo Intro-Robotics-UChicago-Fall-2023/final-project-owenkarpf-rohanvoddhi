@@ -145,7 +145,7 @@ class Environment:
     def perform_action(self, action):
         # perform the action, return the state after moving robot along with the world being done (robot hit wall or reached goal) and current reward
         new_linear_vel, new_angular_vel = action
-        print(f'PERFORMING. linear: {new_linear_vel} angularr: {new_angular_vel}')
+        # print(f'PERFORMING. linear: {new_linear_vel} angularr: {new_angular_vel}')
         self.vel.linear.x = new_linear_vel
         self.vel.angular.z = new_angular_vel
         self.velocity_publisher.publish(self.vel)
@@ -270,7 +270,7 @@ ACTION_DIM = 2
 MAX_LINEAR_VEL = .2
 MIN_LINEAR_VEL = 0
 seed = 96024
-MAX_ANGULAR_VEL = .6
+MAX_ANGULAR_VEL = 1.4
 MIN_ANGULAR_VEL = -1.2
 ACTOR_LEARNING_RATE = .0004
 CRITIC_LEARNING_RATE =  0.00001
@@ -280,9 +280,20 @@ MAX_ITERATIONS = 50000
 MAX_ITERATION_STEPS = 1500
 GAMMA = .9
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-WARMUP_ITERATIONS = 5
+WARMUP_ITERATIONS = 25
 TRAIN_ITERATION_LAG = 1
 
+
+class Scale(nn.Module):
+    def __init__(self, add = [1,0], multiply=[MAX_LINEAR_VEL/2, MAX_ANGULAR_VEL]):
+        super().__init__()
+        self.add =  torch.tensor(add).to(DEVICE)
+        self.multiply =  torch.tensor(multiply).to(DEVICE)
+    
+    def forward(self, x):
+        x = torch.add(x, self.add)
+        x = torch.mul(x, self.multiply)
+        return x
 
 class ActorNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
@@ -293,10 +304,12 @@ class ActorNetwork(nn.Module):
             nn.Linear(640, 16),
             nn.ReLU(),
             nn.Linear(16, action_shape),
-            nn.Tanh()
+            nn.Tanh(),
+            Scale()
         )
 
     def forward(self, current_state):
+        actions = self.actor_network(current_state)
         actions[0] = (actions[0] + 1) * MAX_LINEAR_VEL/2
         actions[1] = actions[1] * MAX_ANGULAR_VEL
         return actions
@@ -577,17 +590,18 @@ def train():
             # ang_noise += ang_noise
             # action_to_perform[0] += (base_lin_noise)
             # action_to_perform[1] += (base_ang_noise)
-            if it > WARMUP_ITERATIONS:
+            if training_iteration > WARMUP_ITERATIONS:
                 action_to_perform = my_model.determine_current_action(state)
-                action_to_perform = add_noise_and_scale_action(action_to_perform, iteration=training_iteration)            
-
+                action_to_perform = add_noise_and_scale_action(action_to_perform, iteration=training_iteration)      
+                print("It: {it}. Model Action:", action_to_perform)      
             else:
                 action_to_perform = get_random_action()
+                print("It: {it}. Random Action: ", action_to_perform)
 
             # print(f"it: {it} wall: {my_env.is_at_wall()}, target: {my_env.is_at_target()[0]} action: {action_to_perform}\n pos:{my_env.get_odom_list()}")
             
             new_state, done, reward = my_env.perform_action(action_to_perform)
-            print("DONE:", done)
+            # print("DONE:", done)
             if reward == Rewards.GOAL:
                 print("DONE DONE DONE")
             elif reward  == Rewards.CRASH:
