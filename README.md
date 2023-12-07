@@ -39,8 +39,12 @@ Sadly, we had limited success in actually getting our implementation working cor
 
 ##### GIF 1
 
+<img src="almost_480p.gif" height="600" width="600">
+
 
 ##### Gif 2
+
+<img src="spinning_480p.gif" height="600" width="600">
 
 
 
@@ -133,7 +137,7 @@ Initially, we wanted the robot to receive a reward for following a general path 
 
 Gazebo had a glitch within it that led to weird simulation behavior. If the robot ran into a wall at a high enough speed, it would see what was on the other side of the wall through its camera. This resulted in our robot sometimes being mis-rewarded with having reached the goal or seeing the goal when it did not in fact achieve such a thing. Below is a GIF of such a thing occurring.
 
-**GIF HERE**
+<img src="screenshot.png" height="600" width="600">
 
 ### Training Challenges
 
