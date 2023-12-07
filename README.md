@@ -78,7 +78,7 @@ The method for determining the reward can be found in the determine_reward funct
 
 Launching the Gazebo World was done in the initialization of the Environment Class. We used the subprocess module to run the command line arguments to launch a modified version of the maze (modified with the addition of a blue end goal) as seen below.
 
-**PUT MAZE IMAGE HERE**
+<img src="screenshot.png" height="300" width="800">
 
 
 ### DDPG Algorithm and Training Loop
@@ -116,8 +116,8 @@ Our implementation for running in the real world was relatively simple. All code
 
 
 # ROS Node Diagram
+<img src="rosgraph" height="300" width="800">
 
-**IMAGE HERE**
 
 # Execution
 
@@ -137,7 +137,6 @@ Initially, we wanted the robot to receive a reward for following a general path 
 
 Gazebo had a glitch within it that led to weird simulation behavior. If the robot ran into a wall at a high enough speed, it would see what was on the other side of the wall through its camera. This resulted in our robot sometimes being mis-rewarded with having reached the goal or seeing the goal when it did not in fact achieve such a thing. Below is a GIF of such a thing occurring.
 
-<img src="screenshot.png" height="300" width="600">
 
 ### Training Challenges
 
