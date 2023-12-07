@@ -78,7 +78,7 @@ The method for determining the reward can be found in the determine_reward funct
 
 Launching the Gazebo World was done in the initialization of the Environment Class. We used the subprocess module to run the command line arguments to launch a modified version of the maze (modified with the addition of a blue end goal) as seen below.
 
-<img src="screenshot.png" height="300" width="800">
+<img src="screenshot.png" height="450" width="900">
 
 
 ### DDPG Algorithm and Training Loop
@@ -116,7 +116,10 @@ Our implementation for running in the real world was relatively simple. All code
 
 
 # ROS Node Diagram
-<img src="rosgraph" height="300" width="800">
+
+Below is our graph of the ROS Nodes and Topics. It was generated using rqt_graph.
+
+<img src="rosgraph.png" height="450" width="900">
 
 
 # Execution
@@ -157,7 +160,7 @@ Unsurprisingly, training time for our model was quite high. Not only did each it
  
 ##### Reward Hacking
 
-The final challenge we faced was the issue of reward hacking. Throughout our time attempting to train the model to successfully navigate the maze in as fast a time as possible, we ran into continuous issues with reward hacking. For example, the robot spinning in circles below is an example of reward hacking, where the robot figured out that by spinning in circles ad infinitum, it would receive a high reward as the linear reward and reward for seeing the end goal outweighed the penalty for turning. Another example was when the robot's camera glitched through the wall in the Gazebo world by running into the wall really fast and then subsequently achieved a high reward for seeing the goal, the robot attempted to do this continuously.
+The final challenge we faced was the issue of reward hacking. Throughout our time attempting to train the model to successfully navigate the maze in as fast a time as possible, we ran into continuous issues with reward hacking. For example, the robot spinning in circles above is an example of reward hacking, where the robot figured out that by spinning in circles ad infinitum, it would receive a high reward as the linear reward and reward for seeing the end goal outweighed the penalty for turning. Another example was when the robot's camera glitched through the wall in the Gazebo world by running into the wall really fast and then subsequently achieved a high reward for seeing the goal, the robot attempted to do this continuously.
 
 
 # Future Work
