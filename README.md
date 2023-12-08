@@ -83,31 +83,96 @@ Launching the Gazebo World was done in the initialization of the Environment Cla
 
 ### DDPG Algorithm and Training Loop
 
+For this project, we used a deep determinsitic policy gradient algorithm (DDPG). The is a type of
+reinforcement learning model that is meant for continuous action spaces where the agent needs to learn
+the reward function as well. There are a couple main components to this a DDPG model: 
+- Actor Network (Ouputs the optimal action for a given state)
+- Critic Network (Learns the reward function over time and outputs the estimated Q for a givens state
+and action)
+- Target Actor and Critic Networks (Copies of the actor and critic networks that are updated slowly to
+avoid training instabilities)
+- Replay Buffer (Stores the transitions of (state, action, reward, new state) to sample from in the 
+training process)
+- Exploratory Noise (Used to get the agent to explore the environment and potentially better paths)
+- Navigation Network (the full model that combines the different actor and critic components)
 
 ##### DDPG Algorithm Implementation
 
-**Rohan pls fill in below sections ty**
-
 ###### Actor Network
+The actor network is a sequential model with a couple linear layers and the ReLU activation function
+between hidden layers. The final activation is a tanh followed by a custom Scale layer that scales the 
+output into the valid action space for the turtlebot. The actor network takes in the state and outputs
+an action to take. 
 
 
 ###### Critic Network
+The critic network is a sequential model with two hidden layers. The input is the current state
+and the action to take and the output is an estimate of the q value. The goal of the critic network
+is to learn how to approximate the reward function properly.
 
-
-###### Replay Buffer
-
+###### Target Actor and Critic Networks
+When we update the actor and critic networks we copy over a fraction (Tau) of the weights
+from the actor and critic network to the target actor and critic network. This because of the fact
+that in such a large continious space it is very possible for the network to get stuck down a wrong
+path. By copying a fraction of the weights we are then increasing the training time in exchange for 
+more stability in training. We experimnted with different values of Tau and it would be interesting to run
+a cross-validation on the different values to see what results in an optimal learning strategy.
 
 ###### Navigation Network
+The navigation network is what brings all the different networks together and trains them. It contains 
+an actor network, a critic network, Adam optimizers for both, and the target actor critic networks. This
+is the network that is saved and loaded from file system for checkpointing purposes. This also is the
+interface for the core model logic. This is repsonible for training the invidiual actor and critic 
+networks. We define critic loss as the MSE loss between the q values from  the target crtic and the 
+regular critic and we backprop on this. For the actor, we want to maximize the q value so we do gradient
+ascent on the reward. This is also where we update the target actor and critic networks as described above.
 
+###### Replay Buffer
+The purpose of the replay buffer is to have the network keep training based on data it has seen before
+while preventing it from learning temporal dependcies. If we were to train in order of each (state, action,
+reward) then the model could learn the temporal relations between them. To avoid this from happening, 
+we add each (state, action, reward) to the replay buffer and after a fixed number of iterations, we sample
+from the replay buffer and use that data to train our model. The replay buffer has a fixed size that 
+we varied through different iterations. The buffer follows a FIFO (first in, first out) eviction policy,
+so the size matters because it affects for how long we can train on older data. Ideally, we would be able
+to run a proper cross-validation scheme to find the optimal buffer size.
 
-##### Training Implementation
-
-**RORO WRITES**
 
 ###### Scaling and Adding Noise
+This is used to add the exploratory noise in the second phase of training (see next section). Here, we add
+exploration noise to the action vector. We sample from a normal distribution for the linear and angular
+noises (with different variance to account for the differening sizes of their respective action spaces).
+We then add the noise to the action vector and clip it so that it is within the valid action space. 
+
+Although, we ended up using a normal distribution for noise, there are other possible alternatives
+that could be looked into. Uniform distributions could be used to encourage more exploration of action 
+space. Temporally correlated noise is another method that we read about which would make it easier for
+the robot to make smooth turns as it would be less jerky (i.e. step 0 is -1 angular velocity and step 1
+as +1 angular velocity isn't particularlry useful, autocorrelated noise could be more useful)
+
 
 ###### Training Loop
+Our training loop has the robot go through many sample iterations. In each sample iteration, we discretize time into a fixed segment where the robot performs an action, after which we update state,
+receive a reward, and choose a new action to perform. Each state, action, and reward are stored
+in the replay buffer and used to train our overall navigational model.
 
+There are two phases to the training loop. In the initial phase, we just want to have our robot explore
+the state and action space and get many different rewards so it can have sufficient data for when it 
+starts training. The idea behind this is that we do not want the model to fit closely to its first couple
+trials of training data, that reduces the chance of getting a good starting network. In this phase,
+at each time step of each iteration an action is uniformly sampled from the action space. Because
+of this methodology the model is expected to learn the reward structure pretty well. However, it takes a
+significant number of "warmup" iterations for this to happen (many thousands). We tested with as many as
+500 and were still barely able to map a quarter of the entire maze. At the end of this phase we start to train on the information stored in the replay buffer. The idea is that now the replay has a more uniform
+distribution of actions and rewards to sample from so our model will be trained better.
+
+The second phase to the training loop is to add exploratory noise to the actions suggested from the model.
+The idea behind this is to use the navigational model to guide the robot, but to add noise on the way. The
+intuition for this is that the model will slowly learn an idea of how to get to the goal, but we want to
+add noise so it can discover slightly better paths each time. This is the phase where the continual training of the model happens, every 10 iteartions we update the model based on a sample of the replay
+buffer.
+
+We also checkpoint our mode to local storage every 25 sample iterations.
 
 
 ### Running in the Real World
