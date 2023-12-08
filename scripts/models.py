@@ -299,7 +299,7 @@ class ActorNetwork(nn.Module):
     def __init__(self, state_shape, action_shape):
         super(ActorNetwork, self).__init__()
 
-        # define actor network structuer as a sequentail modle
+        # define actor network structuer as a sequential model
         self.actor_network = nn.Sequential(
             nn.Linear(state_shape, 640),
             nn.ReLU(),
@@ -315,8 +315,6 @@ class ActorNetwork(nn.Module):
             Calcualate actions from current state
         '''
         actions = self.actor_network(current_state)
-        actions[0] = (actions[0] + 1) * MAX_LINEAR_VEL/2
-        actions[1] = actions[1] * MAX_ANGULAR_VEL
         return actions
 
 
@@ -600,7 +598,7 @@ def eval(path: str):
     '''
     my_model = NavigationNetwork(STATE_DIM, ACTION_DIM)
     my_env = Environment()
-    print(path)
+    print("Loading model stored at:",path)
     my_model.load(path)
     evaluate(my_env, my_model)
 
@@ -666,6 +664,6 @@ def train():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:   # check command line args for path to evaluate model
-        eval(path)
+        eval(sys.argv[1])
     else:
         train()  
